@@ -2,16 +2,16 @@
   {
     "kernelSource": {
       "name": "crux-marisa",
-      "repo": "https://github.com/diudiuyc5200/0728.git",
-      "branch": "test2",
+      "repo": "https://github.com/diudiuyc5200/0602-2.git",
+      "branch": "ceshi",
       "device": "crux",
       "defconfig": "crux_defconfig"
     },
     "toolchains": [
       {
         "name": "proton-clang",
-        "repo": "https://github.com/kdrag0n/proton-clang",
-        "branch": "master",
+        "repo": "https://gitlab.com/LeCmnGend/proton-clang.git",
+        "branch": "clang-16",
         "binaryEnv": ["./bin"]
       }
     ],
