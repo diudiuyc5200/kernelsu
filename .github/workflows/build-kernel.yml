@@ -187,7 +187,7 @@ jobs:
 
 # ===================== 新增：Setup KernelSU，移植自kernel.yml逻辑 =====================
     - name: Setup KernelSU
-      working-directory: $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+      working-directory: kernel_workspace/android-kernel
       env:
         ARCH: ${{ env.ARCH }}
       if: env.ENABLE_KERNELSU == 'true'
