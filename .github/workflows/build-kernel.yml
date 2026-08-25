@@ -199,7 +199,7 @@ jobs:
           rm -rf "./drivers/kernelsu"
         fi
         # 使用ReSukiSU原版setup.sh，拉取main最新
-        curl -LSs "https://raw.githubusercontent.com/lsfqxd2006/ReSukiSU/main/kernel/setup.sh" | bash
+        curl -LSs "https://raw.githubusercontent.com/lsfqxd2006/ReSukiSU/main/kernel/setup.sh" | bash -s 03b60f26
 
         DEFCONFIG=arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         if ! grep -q "CONFIG_KSU=" "$DEFCONFIG"; then
