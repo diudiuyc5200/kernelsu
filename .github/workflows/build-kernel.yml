@@ -75,7 +75,7 @@ jobs:
         docker-images: true
         swap-storage: false
     - name: Set swap to 10G
-      uses: pierotofy/set-swap-space@main
+      uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 10
     - name: Setup build kernel environment
