@@ -2,8 +2,8 @@
   {
     "kernelSource": {
       "name": "crux-marisa",
-      "repo": "https://github.com/diudiuyc5200/ceshi1217.git",
-      "branch": "ceshi",
+      "repo": "https://github.com/diudiuyc5200/0828.git",
+      "branch": "v3.2",
       "device": "crux",
       "defconfig": "crux_defconfig"
     },
