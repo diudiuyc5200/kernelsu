@@ -10,7 +10,7 @@ on:
 
 jobs:
   Read-configuration:
-    name: 🐂 Parse *.config.json
+    name: Build Kernel by ${{ github.actor }}
     runs-on: ubuntu-22.04
     outputs:
       CONFIGS: ${{ steps.generate-matrix.outputs.CONFIGS }}
