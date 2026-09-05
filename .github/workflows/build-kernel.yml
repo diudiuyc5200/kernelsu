@@ -71,12 +71,21 @@ jobs:
           for CONFIG in "${CONFIG_LIST[@]}"; do
               RAW=""
               if [[ "$CONFIG" == "EXTRA_CMDS" || "$CONFIG" == "CUSTOM_CMDS" ]]; then
-                RAW=$(grep -w "${CONFIG}" "${CONFIG_ENV}" || true | head -n 1 | cut -d ":" -f 2-)
+                RAW=$(grep -E "^${CONFIG}:" "${CONFIG_ENV}" || true | head -n 1 | cut -d ":" -f 2-)
               else
-                RAW=$(grep -w "${CONFIG}" "${CONFIG_ENV}" || true | head -n 1 | cut -d "=" -f 2-)
+                RAW=$(grep -E "^${CONFIG}=" "${CONFIG_ENV}" || true | head -n 1 | cut -d "=" -f 2-)
               fi
+              RAW=$(echo "$RAW" | xargs)
               echo "${CONFIG}=${RAW}" >> "$GITHUB_ENV"
           done
+
+          echo "==== DEBUG 解析结果 ===="
+          echo "USE_CUSTOM_CLANG=${{ env.USE_CUSTOM_CLANG }}"
+          echo "CUSTOM_CLANG_SOURCE=${{ env.CUSTOM_CLANG_SOURCE }}"
+          echo "EXTRA_CMDS=${{ env.EXTRA_CMDS }}"
+          echo "CUSTOM_CMDS=${{ env.CUSTOM_CMDS }}"
+          echo "DISABLE_LTO=${{ env.DISABLE_LTO }}"
+          echo "========================"
 
       - name: Remove unused packages
         if: env.REMOVE_UNUSED_PACKAGES == 'true'
