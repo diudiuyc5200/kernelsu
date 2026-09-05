@@ -14,7 +14,7 @@ jobs:
       WORKSPACE_KERNEL: ${{ github.workspace }}/kernel_workspace
       KERNEL_SRC_DIR: ${{ github.workspace }}/kernel_workspace/android-kernel
     steps:
-      - uses: actions/checkout@v5 # 升级 Node24
+      - uses: actions/checkout@v5 # Node24
         name: Checkout workflow repo
 
       - name: Prepare Configuration
@@ -53,7 +53,7 @@ jobs:
               ENABLE_KERNELSU
               KERNELSU_TAG
               ADD_KPROBES_CONFIG
-              DISABLE_LTO # 修复原变量 DISABLE‑LTO 非法横杠！bash变量不能有减号
+              DISABLE_LTO
               ADD_OVERLAYFS_CONFIG
               DISABLE_CC_WERROR
               APPLY_KSU_PATCH
@@ -76,13 +76,12 @@ jobs:
               else
                 RAW=$(grep -w "${CONFIG}" "${CONFIG_ENV}" || true | head -n 1 | cut -d "=" -f 2-)
               fi
-              # 写入github env，空值也保留
               echo "${CONFIG}=${RAW}" >> "$GITHUB_ENV"
           done
 
       - name: Remove unused packages
         if: env.REMOVE_UNUSED_PACKAGES == 'true'
-        uses: jlumbroso/free-disk-space@v1.3.0 # 固定tag，支持node24，不要用main
+        uses: jlumbroso/free-disk-space@v1.3.1 # 正确tag
         with:
           tool-cache: true
           android: false
@@ -93,7 +92,8 @@ jobs:
           swap-storage: false
 
       - name: Set swap to 10G
-        uses: pierotofy/set-swap-space@v1.0 # 固定release tag，node24兼容，抛弃master
+        # 固定commit hash替代master，防止上游破坏性更新
+        uses: pierotofy/set-swap-space@49d87c8379da82c1f4ec3a3f739a1231f753d898
         with:
           swap-size-gb: 10
 
@@ -275,7 +275,7 @@ jobs:
 
       - name: Setup ccache
         if: env.ENABLE_CCACHE == 'true'
-        uses: hendrikmuhs/ccache-action@v2 # v2 支持 Node24
+        uses: hendrikmuhs/ccache-action@v1.2 # 真实存在版本，兼容Node24
         with:
           key: build-kernel-${{ env.DEVICE }}${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}
           max-size: 2G
@@ -383,7 +383,7 @@ jobs:
 
       - name: Upload ${{ env.KERNEL_IMAGE_NAME }}
         if: env.CHECK_FILE_IS_OK == 'true'
-        uses: actions/upload-artifact@v5 # Node24
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ env.KERNEL_IMAGE_NAME }}${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}-${{ env.DEVICE }}-${{ env.BUILD_TIME }}
           path: ${{ env.KERNEL_SRC_DIR }}/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }}
