@@ -10,11 +10,10 @@ jobs:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
-      # 抽公共路径变量，减少重复书写
       WORKSPACE_KERNEL: ${{ github.workspace }}/kernel_workspace
       KERNEL_SRC_DIR: ${{ github.workspace }}/kernel_workspace/android-kernel
     steps:
-      - uses: actions/checkout@v5 # Node24
+      - uses: actions/checkout@v5
         name: Checkout workflow repo
 
       - name: Prepare Configuration
@@ -81,7 +80,7 @@ jobs:
 
       - name: Remove unused packages
         if: env.REMOVE_UNUSED_PACKAGES == 'true'
-        uses: jlumbroso/free-disk-space@v1.3.1 # 正确tag
+        uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: true
           android: false
@@ -92,10 +91,13 @@ jobs:
           swap-storage: false
 
       - name: Set swap to 10G
-        # 固定commit hash替代master，防止上游破坏性更新
-        uses: pierotofy/set-swap-space@49d87c8379da82c1f4ec3a3f739a1231f753d898
-        with:
-          swap-size-gb: 10
+        run: |
+          set -euo pipefail
+          sudo fallocate -l 10G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
       - name: Setup build kernel environment
         run: |
@@ -275,7 +277,7 @@ jobs:
 
       - name: Setup ccache
         if: env.ENABLE_CCACHE == 'true'
-        uses: hendrikmuhs/ccache-action@v1.2 # 真实存在版本，兼容Node24
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: build-kernel-${{ env.DEVICE }}${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}
           max-size: 2G
