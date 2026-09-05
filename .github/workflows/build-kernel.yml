@@ -14,7 +14,7 @@ jobs:
       KERNEL_SRC_DIR: ${{ github.workspace }}/kernel_workspace/android-kernel
 
       KERNEL_SOURCE: https://github.com/diudiuyc5200/0828.git
-      KERNEL_SOURCE_BRANCH: v3.2
+      KERNEL_SOURCE_BRANCH: v3.3
       KERNEL_CONFIG: crux_defconfig
       KERNEL_IMAGE_NAME: Image.gz-dtb
       ARCH: arm64
@@ -70,6 +70,8 @@ jobs:
           echo "==== DEBUG ===="
           echo "USE_CUSTOM_CLANG=$USE_CUSTOM_CLANG"
           echo "CUSTOM_CLANG_SOURCE=$CUSTOM_CLANG_SOURCE"
+          echo "EXTRA_CMDS=$EXTRA_CMDS"
+          echo "CUSTOM_CMDS=$CUSTOM_CMDS"
           echo "=============="
 
       - name: Remove unused packages
@@ -286,16 +288,23 @@ jobs:
             export KSU_EXPECTED_HASH="${KSU_EXPECTED_HASH}"
           fi
 
+          export ${CUSTOM_CMDS}
+          export ${EXTRA_CMDS}
+
+          if [[ -n "${GCC_64:-}" ]]; then
+            export ${GCC_64}
+          fi
+          if [[ -n "${GCC_32:-}" ]]; then
+            export ${GCC_32}
+          fi
+
           COMPILER="clang"
           if [[ "${ENABLE_CCACHE}" == "true" ]]; then
               COMPILER="ccache clang"
           fi
 
-          # 第一步：生成defconfig配置
-          make CC="${COMPILER}" O=out ARCH=${ARCH} ${KERNEL_CONFIG} ${CUSTOM_CMDS} ${EXTRA_CMDS} ${GCC_64} ${GCC_32}
-
-          # 第二步：真正编译内核，不再传入defconfig目标
-          make -j$(nproc --all) CC="${COMPILER}" O=out ARCH=${ARCH} ${CUSTOM_CMDS} ${EXTRA_CMDS} ${GCC_64} ${GCC_32}
+          make CC="${COMPILER}" O=out ARCH=${ARCH} ${KERNEL_CONFIG}
+          make -j$(nproc --all) CC="${COMPILER}" O=out ARCH=${ARCH}
 
       - name: Check a kernel output files
         run: |
