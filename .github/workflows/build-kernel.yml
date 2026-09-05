@@ -6,92 +6,72 @@ jobs:
   build:
     name: Build Kernel by ${{ github.actor }}
     runs-on: ubuntu-22.04
+    # ==========全部配置迁移到此，修改这里就等于旧config.env==========
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
       WORKSPACE_KERNEL: ${{ github.workspace }}/kernel_workspace
       KERNEL_SRC_DIR: ${{ github.workspace }}/kernel_workspace/android-kernel
+
+      KERNEL_SOURCE: https://github.com/diudiuyc5200/0828.git
+      KERNEL_SOURCE_BRANCH: v3.3
+      KERNEL_CONFIG: crux_defconfig
+      KERNEL_IMAGE_NAME: Image.gz-dtb
+      ARCH: arm64
+      ADD_LOCALVERSION_TO_FILENAME: "false"
+      EXTRA_CMDS: "LD=ld.lld KCFLAGS=-Wno-error=strict-prototypes"
+      CUSTOM_CMDS: "CLANG_TRIPLE=aarch64-linux-gnu-  CLANG_TRIPLE_ARM32=arm-linux-gnueabi-"
+
+      USE_CUSTOM_CLANG: "true"
+      CUSTOM_CLANG_SOURCE: https://github.com/kdrag0n/proton-clang
+      CUSTOM_CLANG_BRANCH: master
+      CLANG_BRANCH: main-kernel
+      CLANG_VERSION: r547379
+
+      ENABLE_GCC_ARM64: "true"
+      ENABLE_GCC_ARM32: "true"
+      USE_CUSTOM_GCC_64: ""
+      CUSTOM_GCC_64_SOURCE: ""
+      CUSTOM_GCC_64_BRANCH: ""
+      CUSTOM_GCC_64_BIN: ""
+      USE_CUSTOM_GCC_32: ""
+      CUSTOM_GCC_32_SOURCE: ""
+      CUSTOM_GCC_32_BRANCH: ""
+      CUSTOM_GCC_32_BIN: ""
+
+      ENABLE_KERNELSU: "false"
+      KERNELSU_TAG: ""
+      KSU_EXPECTED_SIZE: ""
+      KSU_EXPECTED_HASH: ""
+
+      DISABLE_LTO: "true"
+      DISABLE_CC_WERROR: "false"
+      ADD_KPROBES_CONFIG: "false"
+      ADD_OVERLAYFS_CONFIG: "false"
+      APPLY_KSU_PATCH: "false"
+
+      USE_CUSTOM_ANYKERNEL3: "false"
+      CUSTOM_ANYKERNEL3_SOURCE: ""
+      CUSTOM_ANYKERNEL3_BRANCH: ""
+
+      ENABLE_CCACHE: "true"
+      NEED_DTBO: "true"
+      BUILD_BOOT_IMG: "false"
+      SOURCE_BOOT_IMAGE: https://raw.githubusercontent.com/xiaoleGun/KernelSU_action/main/boot/boot.img
+      REMOVE_UNUSED_PACKAGES: "false"
+
     steps:
       - uses: actions/checkout@v5
         name: Checkout workflow repo
 
-      - name: Prepare Configuration
+      - name: Debug show env
         run: |
           set -euo pipefail
-          CONFIG_ENV="./config.env"
-          if [[ ! -f "${CONFIG_ENV}" ]]; then
-            echo "ERROR: config.env not found!"
-            exit 1
-          fi
-
-          CONFIG_LIST=(
-              KERNEL_SOURCE
-              KERNEL_SOURCE_BRANCH
-              KERNEL_CONFIG
-              KERNEL_IMAGE_NAME
-              ARCH
-              ADD_LOCALVERSION_TO_FILENAME
-              EXTRA_CMDS
-              CUSTOM_CMDS
-              USE_CUSTOM_CLANG
-              CUSTOM_CLANG_SOURCE
-              CUSTOM_CLANG_BRANCH
-              CLANG_BRANCH
-              CLANG_VERSION
-              ENABLE_GCC_ARM64
-              ENABLE_GCC_ARM32
-              USE_CUSTOM_GCC_64
-              CUSTOM_GCC_64_SOURCE
-              CUSTOM_GCC_64_BRANCH
-              CUSTOM_GCC_64_BIN
-              USE_CUSTOM_GCC_32
-              CUSTOM_GCC_32_SOURCE
-              CUSTOM_GCC_32_BRANCH
-              CUSTOM_GCC_32_BIN
-              ENABLE_KERNELSU
-              KERNELSU_TAG
-              ADD_KPROBES_CONFIG
-              DISABLE_LTO
-              ADD_OVERLAYFS_CONFIG
-              DISABLE_CC_WERROR
-              APPLY_KSU_PATCH
-              USE_CUSTOM_ANYKERNEL3
-              CUSTOM_ANYKERNEL3_SOURCE
-              CUSTOM_ANYKERNEL3_BRANCH
-              ENABLE_CCACHE
-              NEED_DTBO
-              BUILD_BOOT_IMG
-              SOURCE_BOOT_IMAGE
-              KSU_EXPECTED_SIZE
-              KSU_EXPECTED_HASH
-              REMOVE_UNUSED_PACKAGES
-          )
-
-          for CONFIG in "${CONFIG_LIST[@]}"; do
-              RAW=""
-              if [[ "$CONFIG" == "EXTRA_CMDS" || "$CONFIG" == "CUSTOM_CMDS" ]]; then
-                RAW=$(grep -E "^${CONFIG}:" "${CONFIG_ENV}" || true | head -n 1 | cut -d ":" -f 2-)
-              else
-                RAW=$(grep -E "^${CONFIG}=" "${CONFIG_ENV}" || true | head -n 1 | cut -d "=" -f 2-)
-              fi
-              RAW=$(echo "$RAW" | xargs)
-              echo "${CONFIG}=${RAW}" >> "$GITHUB_ENV"
-          done
-
-      - name: Debug show parsed config
-        run: |
-          set -euo pipefail
-          echo "==== DEBUG 解析结果（有效） ===="
+          echo "==== DEBUG ===="
           echo "USE_CUSTOM_CLANG=$USE_CUSTOM_CLANG"
           echo "CUSTOM_CLANG_SOURCE=$CUSTOM_CLANG_SOURCE"
-          echo "CUSTOM_CLANG_BRANCH=$CUSTOM_CLANG_BRANCH"
-          echo "CLANG_BRANCH=$CLANG_BRANCH"
-          echo "CLANG_VERSION=$CLANG_VERSION"
-          echo "DISABLE_LTO=$DISABLE_LTO"
-          echo "ENABLE_GCC_ARM64=$ENABLE_GCC_ARM64"
-          echo "USE_CUSTOM_GCC_64=$USE_CUSTOM_GCC_64"
-          echo "======================================"
+          echo "=============="
 
       - name: Remove unused packages
         if: env.REMOVE_UNUSED_PACKAGES == 'true'
@@ -131,9 +111,9 @@ jobs:
           set -euo pipefail
           cd "${WORKSPACE_KERNEL}"
           mkdir -p clang-aosp
-
+          echo "USE_CUSTOM_CLANG=$USE_CUSTOM_CLANG"
           if [[ "${USE_CUSTOM_CLANG}" == "true" ]]; then
-              echo ">> 使用自定义 Custom‑Clang"
+              echo ">> 使用自定义 Custom‑Clang: $CUSTOM_CLANG_SOURCE"
               if [[ "${CUSTOM_CLANG_SOURCE}" =~ git ]]; then
                   if [[ "${CUSTOM_CLANG_SOURCE}" == *'.tar.gz' ]]; then
                       wget --retry-connrefused --waitretry=5 --tries=5 -O clang.tar.gz "${CUSTOM_CLANG_SOURCE}"
