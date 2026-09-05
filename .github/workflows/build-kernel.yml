@@ -280,7 +280,7 @@ jobs:
           cd "${KERNEL_SRC_DIR}"
           export PATH="${WORKSPACE_KERNEL}/clang-aosp/bin:${PATH}"
           export KBUILD_BUILD_HOST=Github-Action
-          export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr 'A-Z' 'a-z')
+          export KBUILD_BUILD_USER=$(echo ${{ shturl.cc/m7 }} | tr 'A-Z' 'a-z')
 
           if [[ -n "${KSU_EXPECTED_SIZE}" && -n "${KSU_EXPECTED_HASH}" ]]; then
             export KSU_EXPECTED_SIZE="${KSU_EXPECTED_SIZE}"
@@ -292,12 +292,12 @@ jobs:
               COMPILER="ccache clang"
           fi
 
-          make -j$(nproc --all) CC="${COMPILER}" O=out ARCH=${ARCH} \
-            ${KERNEL_CONFIG} \
-            ${CUSTOM_CMDS} \
-            ${EXTRA_CMDS} \
-            ${GCC_64} \
-            ${GCC_32}
+          # 第一步：生成defconfig配置
+          make CC="${COMPILER}" O=out ARCH=${ARCH} ${KERNEL_CONFIG} ${CUSTOM_CMDS} ${EXTRA_CMDS} ${GCC_64} ${GCC_32}
+
+          # 第二步：真正编译内核（不要再带xxx_defconfig！）
+          make -j$(nproc --all) CC="${COMPILER}" O=out ARCH=${ARCH} ${CUSTOM_CMDS} ${EXTRA_CMDS} ${GCC_64} ${GCC_32}
+
 
       - name: Check a kernel output files
         run: |
