@@ -11,290 +11,187 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_COMPRESSLEVEL: 6
       CCACHE_MAXSIZE: 12G
+      CONFIG_JSON: ${{ github.workspace }}/crux.config.json
     steps:
     - uses: actions/checkout@v4
-    - name: Prepare Configuration
+
+    - name: Load config from json
+      id: loadcfg
       run: |
-        CONFIG_ENV=$(grep -w "CONFIG_ENV" config.env | head -n 1 | cut -d "=" -f 2)
-        CONFIG_LIST=(
-            KERNEL_SOURCE
-            KERNEL_SOURCE_BRANCH
-            KERNEL_CONFIG
-            KERNEL_IMAGE_NAME
-            ARCH
-            ADD_LOCALVERSION_TO_FILENAME
-            EXTRA_CMDS
-            USE_CUSTOM_CLANG
-            CUSTOM_CLANG_SOURCE
-            CUSTOM_CLANG_BRANCH
-            CUSTOM_CMDS
-            CLANG_BRANCH
-            CLANG_VERSION
-            ENABLE_GCC_ARM64
-            ENABLE_GCC_ARM32
-            USE_CUSTOM_GCC_64
-            CUSTOM_GCC_64_SOURCE
-            CUSTOM_GCC_64_BRANCH
-            CUSTOM_GCC_64_BIN
-            USE_CUSTOM_GCC_32
-            CUSTOM_GCC_32_SOURCE
-            CUSTOM_GCC_32_BRANCH
-            CUSTOM_GCC_32_BIN
-            ENABLE_KERNELSU
-            KERNELSU_TAG
-            ADD_KPROBES_CONFIG
-            DISABLE-LTO
-            ADD_OVERLAYFS_CONFIG
-            DISABLE_CC_WERROR
-            APPLY_KSU_PATCH
-            USE_CUSTOM_ANYKERNEL3
-            CUSTOM_ANYKERNEL3_SOURCE
-            CUSTOM_ANYKERNEL3_BRANCH
-            ENABLE_CCACHE
-            NEED_DTBO
-            BUILD_BOOT_IMG
-            SOURCE_BOOT_IMAGE
-            KSU_EXPECTED_SIZE
-            KSU_EXPECTED_HASH
-            REMOVE_UNUSED_PACKAGES
-        )
-        for CONFIG in "${CONFIG_LIST[@]}"; do
-            echo "$CONFIG=$(grep -w "$CONFIG" "$CONFIG_ENV" | head -n 1 | cut -d "=" -f 2)" >> $GITHUB_ENV
-        done
-    - name: Remove unused packages
-      if: env.REMOVE_UNUSED_PACKAGES == 'true'
-      uses: jlumbroso/free-disk-space@main
-      with:
-        tool-cache: true
-        android: false
-        dotnet: true
-        haskell: true
-        large-packages: true
-        docker-images: true
-        swap-storage: false
+        jq '.' ${{ env.CONFIG_JSON }}
+        echo "KERNEL_NAME=$(jq -r '.kernelSource.name' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
+        echo "KERNEL_REPO=$(jq -r '.kernelSource.repo' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
+        echo "KERNEL_BRANCH=$(jq -r '.kernelSource.branch' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
+        echo "KERNEL_DEVICE=$(jq -r '.kernelSource.device' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
+        echo "KERNEL_DEFCONFIG=$(jq -r '.kernelSource.defconfig' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
+        echo "ENABLE_CCACHE=$(jq -r '.enableCcache' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
+        echo "USE_ANYKERNEL3=$(jq -r '.AnyKernel3.use' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
+        echo "ENABLE_KERNELSU=$(jq -r '.enableKernelSU' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
+        echo "BUILD_TIME=$(TZ=Asia/Shanghai date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
+
     - name: Set swap to 10G
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 10
+
     - name: Setup build environment
       run: |
-        echo "BUILD_TIME=$(TZ=Asia/Shanghai date +%Y%m%d%H%M)" >> $GITHUB_ENV
-        echo "DEVICE=$(echo ${{ env.KERNEL_CONFIG }} | sed 's!vendor/!!;s/_defconfig//;s/_user//;s/-perf//')" >> $GITHUB_ENV
         sudo apt-get update
-        sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-sax-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 python3
+        sudo apt-get install -y git jq ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-sax-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 python3
         mkdir -p $GITHUB_WORKSPACE/kernel_workspace
-    - name: Download Clang‑aosp
-      if: env.USE_CUSTOM_CLANG != 'true'
+
+    - name: Download toolchains
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        mkdir clang-aosp
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/${{ env.CLANG_BRANCH }}/clang-${{ env.CLANG_VERSION }}.tar.gz
-        tar -C clang-aosp -zxf clang-${{ env.CLANG_VERSION }}.tar.gz
-    - name: Download Custom‑Clang
-      if: env.USE_CUSTOM_CLANG == 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        if [[ ${{ env.CUSTOM_CLANG_SOURCE }} =~ .tar.gz$ ]]; then
-          wget ${{ env.CUSTOM_CLANG_SOURCE }} -O clang.tar.gz
-          mkdir clang-aosp
-          tar -C clang-aosp -zxf clang.tar.gz
-        else
-          git clone ${{ env.CUSTOM_CLANG_SOURCE }} -b ${{ env.CUSTOM_CLANG_BRANCH }} clang-aosp --depth=1
-        fi
-    - name: Download GCC‑aosp
-      if: env.USE_CUSTOM_GCC_64 != 'true' || env.USE_CUSTOM_GCC_32 != 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        if [ ${{ env.ENABLE_GCC_ARM64 }} = true ]; then
-          mkdir gcc-64
-          wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz -O gcc-aarch64.tar.gz
-          tar -C gcc-64 -zxf gcc-aarch64.tar.gz
-          echo "GCC_64=CROSS_COMPILE=$GITHUB_WORKSPACE/kernel_workspace/gcc-64/bin/aarch64-linux-android-" >> $GITHUB_ENV
-        fi
-        if [ ${{ env.ENABLE_GCC_ARM32 }} = true ]; then
-          mkdir gcc-32
-          wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz -O gcc-arm.tar.gz
-          tar -C gcc-32 -zxf gcc-arm.tar.gz
-          echo "GCC_32=CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/kernel_workspace/gcc-32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
-        fi
-    - name: Download Custom‑GCC
-      if: env.USE_CUSTOM_GCC_64 == 'true' || env.USE_CUSTOM_GCC_32 == 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        if [ ${{ env.USE_CUSTOM_GCC_64 }} = true ]; then
-          git clone ${{ env.CUSTOM_GCC_64_SOURCE }} -b ${{ env.CUSTOM_GCC_64_BRANCH }} gcc-64 --depth=1
-          echo "GCC_64=CROSS_COMPILE=$GITHUB_WORKSPACE/kernel_workspace/gcc-64/bin/${{ env.CUSTOM_GCC_64_BIN }}" >> $GITHUB_ENV
-        fi
-        if [ ${{ env.USE_CUSTOM_GCC_32 }} = true ]; then
-          git clone ${{ env.CUSTOM_GCC_32_SOURCE }} -b ${{ env.CUSTOM_GCC_32_BRANCH }} gcc-32 --depth=1
-          echo "GCC_32=CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/kernel_workspace/gcc-32/bin/${{ env.CUSTOM_GCC_32_BIN }}" >> $GITHUB_ENV
-        fi
-    - name: Download mkbootimg tools
-      if: env.BUILD_BOOT_IMG == 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone https://android.googlesource.com/platform/system/tools/mkbootimg tools -b master‑kernel‑build‑tools --depth=1
+        toolchains=$(jq -c '.toolchains[]' ${{ env.CONFIG_JSON }})
+        echo "$toolchains" | while read -r tc; do
+          name=$(echo "$tc" | jq -r '.name')
+          repo=$(echo "$tc" | jq -r '.repo')
+          branch=$(echo "$tc" | jq -r '.branch')
+          binaryEnv=$(echo "$tc" | jq -r '.binaryEnv[]')
+          git clone --recursive --depth=1 -j$(nproc) -b "$branch" "$repo" "$name"
+          for sub in $binaryEnv; do
+            echo "$GITHUB_WORKSPACE/kernel_workspace/$name/$sub" >> $GITHUB_PATH
+          done
+        done
+        echo "==== Final PATH ===="
+        echo "$PATH"
+
     - name: Download kernel source
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_SOURCE_BRANCH }} android-kernel --depth=1
-        if [[ ${{ env.ADD_LOCALVERSION_TO_FILENAME }} == 'true' ]]; then
-          echo "LOCALVERSION=$(cat android-kernel/localversion 2>/dev/null || true)" >> $GITHUB_ENV
-        else
-          echo "LOCALVERSION=" >> $GITHUB_ENV
-        fi
-    - name: Download source boot image
-      if: env.BUILD_BOOT_IMG == 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        wget ${{ env.SOURCE_BOOT_IMAGE }} -O boot-source.img
-        if [ -f boot-source.img ]; then
-          echo "FORMAT_MKBOOTIMG=$(python3 tools/mkbootimg.py --unpack boot-source.img --format)" >> $GITHUB_ENV
-          echo "HAVE_BOOT_IMAGE=true" >> $GITHUB_ENV
-        fi
+        git clone --recursive --depth=1 -b ${{ steps.loadcfg.outputs.KERNEL_BRANCH }} ${{ steps.loadcfg.outputs.KERNEL_REPO }} android-kernel
+
     - name: Setup KernelSU
       working-directory: ${{ github.workspace }}/kernel_workspace/android-kernel
-      if: env.ENABLE_KERNELSU == 'true'
+      if: steps.loadcfg.outputs.ENABLE_KERNELSU == 'true'
       run: |
         rm -rf ./KernelSU drivers/kernelsu
-        curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -s ${{ env.KERNELSU_TAG }}
-        DEFCONFIG=arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+        curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
+        DEFCONFIG=arch/arm64/configs/${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
         grep -q "CONFIG_KSU=y" "$DEFCONFIG" || echo "CONFIG_KSU=y" >> "$DEFCONFIG"
         grep -q "CONFIG_KSU_MANUAL_HOOK=y" "$DEFCONFIG" || echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$DEFCONFIG"
-    - name: Apply config patches
+
+    - name: Disable LTO
+      working-directory: ${{ github.workspace }}/kernel_workspace/android-kernel
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        DEFCONFIG=arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        if [ ${{ env.ADD_KPROBES_CONFIG }} = true ]; then
-          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
-        fi
-        if [ ${{ env.ADD_OVERLAYFS_CONFIG }} = true ]; then
-          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
-        fi
-        if [ ${{ env.DISABLE-LTO }} = true ]; then
-          sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' $DEFCONFIG
-          sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' $DEFCONFIG
-          echo "CONFIG_LTO_NONE=y" >> $DEFCONFIG
-        fi
-        if [ ${{ env.DISABLE_CC_WERROR }} = true ]; then
-          echo "CONFIG_CC_WERROR=n" >> $DEFCONFIG
-        fi
+        DEFCONFIG=arch/arm64/configs/${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
+        sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' $DEFCONFIG
+        sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' $DEFCONFIG
+        echo "# CONFIG_LTO_NONE=y" >> $DEFCONFIG
+
     - name: Restore ccache
-      if: env.ENABLE_CCACHE == 'true'
+      if: steps.loadcfg.outputs.ENABLE_CCACHE == 'true'
       uses: actions/cache@v4
       with:
         path: ${{ env.CCACHE_DIR }}
-        key: ${{ github.job }}‑ccache‑${{ env.DEVICE }}
+        key: kernel‑ccache‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}
         restore-keys: |
-          ${{ github.job }}‑ccache‑
-    - name: Build kernel
+          kernel‑ccache‑
+
+    - name: Generate make args
+      id: genargs
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$PATH
+        PARAMS=$(jq '.params' ${{ env.CONFIG_JSON }})
+        WORKSPACE=${{ github.workspace }}/kernel_workspace
+        ARCH=$(echo "$PARAMS" | jq -r '.ARCH')
+        CC=$(echo "$PARAMS" | jq -r '.CC')
+        THREAD=$(nproc --all)
+        args="-j${THREAD} O=out ARCH=$ARCH"
+
+        if [[ "$CC" == *"/"* ]];then
+          CC="${WORKSPACE}/$CC"
+        fi
+        if [ ${{ steps.loadcfg.outputs.ENABLE_CCACHE }} = true ];then
+          args="$args CC=\"ccache $CC\""
+        else
+          args="$args CC=$CC"
+        fi
+
+        while read -r line; do
+          key=$(echo "$line" | cut -d= -f1)
+          val=$(echo "$line" | cut -d= -f2-)
+          if [[ "$val" == *"/"* ]];then
+            val="${WORKSPACE}/$val"
+          fi
+          args="$args $key=$val"
+        done < <(jq -r '.externalCommands | to_entries[] | "\(.key)=\(.value)"' <<< "$PARAMS")
+
+        echo "ARGS=$args"
+        echo "ARGS=$args" >> $GITHUB_OUTPUT
+
+    - name: Build kernel
+      working-directory: ${{ github.workspace }}/kernel_workspace/android-kernel
+      env:
+        ARGS: ${{ steps.genargs.outputs.ARGS }}
+      run: |
         export KBUILD_BUILD_HOST=Github‑Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
-        if [ -n "${{ env.KSU_EXPECTED_SIZE }}" ] && [ -n "${{ env.KSU_EXPECTED_HASH }}" ]; then
-          export KSU_EXPECTED_SIZE=${{ env.KSU_EXPECTED_SIZE }}
-          export KSU_EXPECTED_HASH=${{ env.KSU_EXPECTED_HASH }}
-        fi
+        echo "==== MAKE ARGS ===="
+        echo "${ARGS}"
+        echo "==================="
+        make ${ARGS} ${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
+        make ${ARGS}
 
-        MAKE_ARGS=()
-        MAKE_ARGS+=("O=out")
-        MAKE_ARGS+=("ARCH=${{ env.ARCH }}")
-        MAKE_ARGS+=("CC=clang")
-
-        if [[ -n "${{ env.CUSTOM_CMDS }}" ]];then
-          read -ra TMP_ARR <<< "${{ env.CUSTOM_CMDS }}"
-          MAKE_ARGS+=("${TMP_ARR[@]}")
-        fi
-        if [[ -n "${{ env.EXTRA_CMDS }}" ]];then
-          read -ra TMP_ARR <<< "${{ env.EXTRA_CMDS }}"
-          MAKE_ARGS+=("${TMP_ARR[@]}")
-        fi
-        if [[ -n "${{ env.GCC_64 }}" ]];then
-          read -ra TMP_ARR <<< "${{ env.GCC_64 }}"
-          MAKE_ARGS+=("${TMP_ARR[@]}")
-        fi
-        if [[ -n "${{ env.GCC_32 }}" ]];then
-          read -ra TMP_ARR <<< "${{ env.GCC_32 }}"
-          MAKE_ARGS+=("${TMP_ARR[@]}")
-        fi
-
-        echo "==== MAKE_ARGS dump ===="
-        for i in "${MAKE_ARGS[@]}"; do echo "-> $i"; done
-        echo "========================"
-
-        make -j$(nproc --all) "${MAKE_ARGS[@]}" ${{ env.KERNEL_CONFIG }}
-
-        if [ ${{ env.ENABLE_CCACHE }} = true ]; then
-          MAKE_ARGS_CCACHE=("${MAKE_ARGS[@]}")
-          for idx in "${!MAKE_ARGS_CCACHE[@]}"; do
-            if [[ "${MAKE_ARGS_CCACHE[$idx]}" == "CC=clang" ]];then
-               MAKE_ARGS_CCACHE[$idx]="CC=ccache clang"
-            fi
-          done
-          make -j$(nproc --all) "${MAKE_ARGS_CCACHE[@]}"
-        else
-          make -j$(nproc --all) "${MAKE_ARGS[@]}"
-        fi
-    - name: Check build artifacts
+    - name: Check artifacts & print size/md5sum for debug
+      id: checkart
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        if [ -f android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }} ]; then
-          echo "BUILD_OK=true" >> $GITHUB_ENV
-        else
-          echo "Kernel image missing!"
-          exit 1
-        fi
-        if [ ${{ env.NEED_DTBO }} = true ]; then
-          if [ ! -f android-kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img ]; then
-            echo "dtbo.img missing!"
-            exit 1
-          fi
-        fi
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel/out/arch/arm64/boot
+        ls -lh
+        md5sum Image Image.gz Image.gz-dtb dtbo.img
+        echo "BUILD_OK=true" >> $GITHUB_ENV
+
+    - name: Upload Image (raw uncompressed kernel)
+      uses: actions/upload-artifact@v4
+      with:
+        name: Image‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
+        path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/Image
+        retention-days: 7
+
+    - name: Upload Image.gz (gzip raw kernel)
+      uses: actions/upload-artifact@v4
+      with:
+        name: Image.gz‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
+        path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
+        retention-days: 7
+
+    - name: Upload Image.gz‑dtb (final kernel+dtb blob)
+      uses: actions/upload-artifact@v4
+      with:
+        name: Image.gz‑dtb‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
+        path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz-dtb
+        retention-days: 7
+
+    - name: Upload dtb folder (all dtb blobs)
+      uses: actions/upload-artifact@v4
+      with:
+        name: dtb‑folder‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
+        path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/dtb
+        retention-days: 7
+
+    - name: Upload dtbo.img
+      uses: actions/upload-artifact@v4
+      with:
+        name: dtbo‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
+        path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/dtbo.img
+        retention-days: 7
+
     - name: Prepare AnyKernel3
-      if: env.BUILD_OK == 'true' && env.USE_CUSTOM_ANYKERNEL3 != 'true'
+      if: env.BUILD_OK == 'true' && steps.loadcfg.outputs.USE_ANYKERNEL3 == 'true'
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3 --depth=1
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-        cp android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }} AnyKernel3/
-        if [ ${{ env.NEED_DTBO }} = true ]; then
-          cp android-kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img AnyKernel3/
+        cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+        if [ -f android-kernel/out/arch/arm64/boot/dtbo.img ];then
+          cp android-kernel/out/arch/arm64/boot/dtbo.img AnyKernel3/
         fi
         rm -rf AnyKernel3/.git* AnyKernel3/README.md
-    - name: Prepare Custom‑AnyKernel3
-      if: env.BUILD_OK == 'true' && env.USE_CUSTOM_ANYKERNEL3 == 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        git clone ${{ env.CUSTOM_ANYKERNEL3_SOURCE }} -b ${{ env.CUSTOM_ANYKERNEL3_BRANCH }} AnyKernel3 --depth=1
-        cp android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }} AnyKernel3/
-        if [ ${{ env.NEED_DTBO }} = true ]; then
-          cp android-kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img AnyKernel3/
-        fi
-        rm -rf AnyKernel3/.git* AnyKernel3/README.md
-    - name: Generate boot.img
-      if: env.BUILD_OK == 'true' && env.BUILD_BOOT_IMG == 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        python3 tools/mkbootimg.py --kernel android-kernel/out/arch/${{ env.ARCH }}/boot/${{ env.KERNEL_IMAGE_NAME }} ${{ env.FORMAT_MKBOOTIMG }} -o new-boot.img
-    - name: Upload kernel‑zip
-      if: env.BUILD_OK == 'true'
+
+    - name: Upload AnyKernel3 zip artifact
+      if: env.BUILD_OK == 'true' && steps.loadcfg.outputs.USE_ANYKERNEL3 == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: AnyKernel‑${{ env.DEVICE }}‑${{ env.BUILD_TIME }}
+        name: AnyKernel‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
         path: ${{ github.workspace }}/kernel_workspace/AnyKernel3
-    - name: Upload boot.img
-      if: env.BUILD_OK == 'true' && env.BUILD_BOOT_IMG == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: boot‑${{ env.DEVICE }}‑${{ env.BUILD_TIME }}
-        path: ${{ github.workspace }}/kernel_workspace/new-boot.img
-    - name: Upload dtbo.img
-      if: env.BUILD_OK == 'true' && env.NEED_DTBO == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: dtbo‑${{ env.DEVICE }}‑${{ env.BUILD_TIME }}
-        path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img
+        retention-days: 7
