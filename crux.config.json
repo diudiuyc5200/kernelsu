@@ -1,4 +1,3 @@
-// crux.config.json 放在仓库根目录
 {
   "kernelSource": {
     "name": "crux-marisa",
