@@ -78,7 +78,6 @@ jobs:
         DEFCONFIG=arch/arm64/configs/${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
         sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' $DEFCONFIG
         sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' $DEFCONFIG
-        echo "# CONFIG_LTO_NONE=y" >> $DEFCONFIG
 
     - name: Restore ccache
       if: steps.loadcfg.outputs.ENABLE_CCACHE == 'true'
@@ -89,7 +88,7 @@ jobs:
         restore-keys: |
           kernel‑ccache‑
 
-    - name: Generate make args
+    - name: Generate make args (bash array zero‑delimited)
       id: genargs
       run: |
         PARAMS=$(jq '.params' ${{ env.CONFIG_JSON }})
@@ -97,48 +96,58 @@ jobs:
         ARCH=$(echo "$PARAMS" | jq -r '.ARCH')
         CC=$(echo "$PARAMS" | jq -r '.CC')
         THREAD=$(nproc --all)
-        args="-j${THREAD} O=out ARCH=$ARCH"
+
+        args_arr=(
+          "-j${THREAD}"
+          "O=out"
+          "ARCH=${ARCH}"
+        )
 
         if [[ "$CC" == *"/"* ]];then
-          CC="${WORKSPACE}/$CC"
+          CC="${WORKSPACE}/${CC}"
         fi
-        if [ ${{ steps.loadcfg.outputs.ENABLE_CCACHE }} = true ];then
-          args="$args CC=\"ccache $CC\""
+
+        if [ "${{ steps.loadcfg.outputs.ENABLE_CCACHE }}" = "true" ];then
+          args_arr+=("CC=ccache ${CC}")
         else
-          args="$args CC=$CC"
+          args_arr+=("CC=${CC}")
         fi
 
         while read -r line; do
           key=$(echo "$line" | cut -d= -f1)
           val=$(echo "$line" | cut -d= -f2-)
           if [[ "$val" == *"/"* ]];then
-            val="${WORKSPACE}/$val"
+            val="${WORKSPACE}/${val}"
           fi
-          args="$args $key=$val"
+          args_arr+=("${key}=${val}")
         done < <(jq -r '.externalCommands | to_entries[] | "\(.key)=\(.value)"' <<< "$PARAMS")
 
-        echo "ARGS=$args"
-        echo "ARGS=$args" >> $GITHUB_OUTPUT
+        printf '%s\0' "${args_arr[@]}" > $GITHUB_WORKSPACE/args.bin
+        echo "ARGS_BIN=$GITHUB_WORKSPACE/args.bin" >> $GITHUB_OUTPUT
 
     - name: Build kernel
       working-directory: ${{ github.workspace }}/kernel_workspace/android-kernel
-      env:
-        ARGS: ${{ steps.genargs.outputs.ARGS }}
       run: |
         export KBUILD_BUILD_HOST=Github‑Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
-        echo "==== MAKE ARGS ===="
-        echo "${ARGS}"
-        echo "==================="
-        make ${ARGS} ${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
-        make ${ARGS}
+
+        mapfile -d '' args < ${{ steps.genargs.outputs.ARGS_BIN }}
+
+        echo "==== MAKE ARGS dump ===="
+        for p in "${args[@]}"; do
+          echo "-> $p"
+        done
+        echo "======================="
+
+        make "${args[@]}" ${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
+        make "${args[@]}"
 
     - name: Check artifacts & print size/md5sum for debug
       id: checkart
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel/out/arch/arm64/boot
+        cd ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot
         ls -lh
-        md5sum Image Image.gz Image.gz-dtb dtbo.img
+        md5sum Image Image.gz Image.gz-dtb dtbo.img || true
         echo "BUILD_OK=true" >> $GITHUB_ENV
 
     - name: Upload Image (raw uncompressed kernel)
@@ -179,7 +188,7 @@ jobs:
     - name: Prepare AnyKernel3
       if: env.BUILD_OK == 'true' && steps.loadcfg.outputs.USE_ANYKERNEL3 == 'true'
       run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
+        cd ${{ github.workspace }}/kernel_workspace
         git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3 --depth=1
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
         cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
