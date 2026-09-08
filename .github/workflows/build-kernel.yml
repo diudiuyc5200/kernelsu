@@ -6,15 +6,17 @@ jobs:
     name: Build Kernel by ${{ github.actor }}
     runs-on: ubuntu-22.04
     env:
-      CCACHE_COMPILERCHECK: content
-      CCACHE_COMPRESS: true
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_COMPRESSLEVEL: 6
-      CCACHE_MAXSIZE: 12G
+      # === 移植原版模板 ccache 环境变量 ===
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      CCACHE_SLOPPINESS: time_macros,file_stat_matches,include_file_ctime
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      KBUILD_BUILD_TIMESTAMP: ""
+
       CONFIG_JSON: ${{ github.workspace }}/crux.config.json
     steps:
     - uses: actions/checkout@v4
-
     - name: Load config from json
       id: loadcfg
       run: |
@@ -28,18 +30,15 @@ jobs:
         echo "USE_ANYKERNEL3=$(jq -r '.AnyKernel3.use' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
         echo "ENABLE_KERNELSU=$(jq -r '.enableKernelSU' ${{ env.CONFIG_JSON }})" >> $GITHUB_OUTPUT
         echo "BUILD_TIME=$(TZ=Asia/Shanghai date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
-
     - name: Set swap to 10G
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 10
-
     - name: Setup build environment
       run: |
         sudo apt-get update
         sudo apt-get install -y git jq ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-sax-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 python3
         mkdir -p $GITHUB_WORKSPACE/kernel_workspace
-
     - name: Download toolchains
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
@@ -56,12 +55,10 @@ jobs:
         done
         echo "==== Final PATH ===="
         echo "$PATH"
-
     - name: Download kernel source
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone --recursive --depth=1 -b ${{ steps.loadcfg.outputs.KERNEL_BRANCH }} ${{ steps.loadcfg.outputs.KERNEL_REPO }} android-kernel
-
     - name: Setup KernelSU
       working-directory: ${{ github.workspace }}/kernel_workspace/android-kernel
       if: steps.loadcfg.outputs.ENABLE_KERNELSU == 'true'
@@ -71,23 +68,19 @@ jobs:
         DEFCONFIG=arch/arm64/configs/${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
         grep -q "CONFIG_KSU=y" "$DEFCONFIG" || echo "CONFIG_KSU=y" >> "$DEFCONFIG"
         grep -q "CONFIG_KSU_MANUAL_HOOK=y" "$DEFCONFIG" || echo "CONFIG_KSU_MANUAL_HOOK=y" >> "$DEFCONFIG"
-
     - name: Disable LTO
       working-directory: ${{ github.workspace }}/kernel_workspace/android-kernel
       run: |
         DEFCONFIG=arch/arm64/configs/${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
         sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' $DEFCONFIG
         sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' $DEFCONFIG
-
-    - name: Restore ccache
+    # ========== 替换原来 actions/cache@v4，改用原版模板的 ccache‑action ==========
+    - name: Setup ccache
       if: steps.loadcfg.outputs.ENABLE_CCACHE == 'true'
-      uses: actions/cache@v4
+      uses: hendrikmuhs/ccache-action@v1.2
       with:
-        path: ${{ env.CCACHE_DIR }}
         key: kernel‑ccache‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}
-        restore-keys: |
-          kernel‑ccache‑
-
+        max-size: 2G
     - name: Generate make args (bash array zero‑delimited)
       id: genargs
       run: |
@@ -96,23 +89,19 @@ jobs:
         ARCH=$(echo "$PARAMS" | jq -r '.ARCH')
         CC=$(echo "$PARAMS" | jq -r '.CC')
         THREAD=$(nproc --all)
-
         args_arr=(
           "-j${THREAD}"
           "O=out"
           "ARCH=${ARCH}"
         )
-
         if [[ "$CC" == *"/"* ]];then
           CC="${WORKSPACE}/${CC}"
         fi
-
         if [ "${{ steps.loadcfg.outputs.ENABLE_CCACHE }}" = "true" ];then
           args_arr+=("CC=ccache ${CC}")
         else
           args_arr+=("CC=${CC}")
         fi
-
         while read -r line; do
           key=$(echo "$line" | cut -d= -f1)
           val=$(echo "$line" | cut -d= -f2-)
@@ -121,17 +110,20 @@ jobs:
           fi
           args_arr+=("${key}=${val}")
         done < <(jq -r '.externalCommands | to_entries[] | "\(.key)=\(.value)"' <<< "$PARAMS")
-
         printf '%s\0' "${args_arr[@]}" > $GITHUB_WORKSPACE/args.bin
         echo "ARGS_BIN=$GITHUB_WORKSPACE/args.bin" >> $GITHUB_OUTPUT
-
     - name: Build kernel
       working-directory: ${{ github.workspace }}/kernel_workspace/android-kernel
       run: |
         export KBUILD_BUILD_HOST=Github‑Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
-
         mapfile -d '' args < ${{ steps.genargs.outputs.ARGS_BIN }}
+
+        # 打印ccache统计（仅开启时）
+        if [ "${{ steps.loadcfg.outputs.ENABLE_CCACHE }}" = "true" ];then
+          echo "==== ccache stats before build ===="
+          ccache -s
+        fi
 
         echo "==== MAKE ARGS dump ===="
         for p in "${args[@]}"; do
@@ -142,6 +134,10 @@ jobs:
         make "${args[@]}" ${{ steps.loadcfg.outputs.KERNEL_DEFCONFIG }}
         make "${args[@]}"
 
+        if [ "${{ steps.loadcfg.outputs.ENABLE_CCACHE }}" = "true" ];then
+          echo "==== ccache stats after build ===="
+          ccache -s
+        fi
     - name: Check artifacts & print size/md5sum for debug
       id: checkart
       run: |
@@ -149,42 +145,36 @@ jobs:
         ls -lh
         md5sum Image Image.gz Image.gz-dtb dtbo.img || true
         echo "BUILD_OK=true" >> $GITHUB_ENV
-
     - name: Upload Image (raw uncompressed kernel)
       uses: actions/upload-artifact@v4
       with:
         name: Image‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
         path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/Image
         retention-days: 7
-
     - name: Upload Image.gz (gzip raw kernel)
       uses: actions/upload-artifact@v4
       with:
         name: Image.gz‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
         path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
         retention-days: 7
-
     - name: Upload Image.gz‑dtb (final kernel+dtb blob)
       uses: actions/upload-artifact@v4
       with:
         name: Image.gz‑dtb‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
         path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz-dtb
         retention-days: 7
-
     - name: Upload dtb folder (all dtb blobs)
       uses: actions/upload-artifact@v4
       with:
         name: dtb‑folder‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
         path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/dtb
         retention-days: 7
-
     - name: Upload dtbo.img
       uses: actions/upload-artifact@v4
       with:
         name: dtbo‑${{ steps.loadcfg.outputs.KERNEL_DEVICE }}‑${{ steps.loadcfg.outputs.BUILD_TIME }}
         path: ${{ github.workspace }}/kernel_workspace/android-kernel/out/arch/arm64/boot/dtbo.img
         retention-days: 7
-
     - name: Prepare AnyKernel3
       if: env.BUILD_OK == 'true' && steps.loadcfg.outputs.USE_ANYKERNEL3 == 'true'
       run: |
@@ -196,7 +186,6 @@ jobs:
           cp android-kernel/out/arch/arm64/boot/dtbo.img AnyKernel3/
         fi
         rm -rf AnyKernel3/.git* AnyKernel3/README.md
-
     - name: Upload AnyKernel3 zip artifact
       if: env.BUILD_OK == 'true' && steps.loadcfg.outputs.USE_ANYKERNEL3 == 'true'
       uses: actions/upload-artifact@v4
